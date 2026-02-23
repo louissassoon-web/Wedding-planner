@@ -1,31 +1,16 @@
 import { NextAuthOptions } from "next-auth";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import CredentialsProvider from "next-auth/providers/credentials";
-import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { db } from "./db";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
   session: {
     strategy: "jwt",
   },
   pages: {
     signIn: "/login",
-    newUser: "/onboarding",
   },
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          scope: "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send",
-          access_type: "offline",
-          prompt: "consent",
-        },
-      },
-    }),
     CredentialsProvider({
       name: "credentials",
       credentials: {
@@ -67,11 +52,7 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
-    async jwt({ token, user, account }) {
-      if (account && user) {
-        token.accessToken = account.access_token;
-        token.refreshToken = account.refresh_token;
-      }
+    async jwt({ token }) {
       return token;
     },
   },

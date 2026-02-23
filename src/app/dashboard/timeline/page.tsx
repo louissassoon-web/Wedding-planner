@@ -200,7 +200,7 @@ export default function TimelinePage() {
           <div className="relative">
             <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-border" />
             <div className="space-y-6">
-              {sortedMilestones.map((milestone, index) => (
+              {sortedMilestones.map((milestone) => (
                 <div key={milestone.id} className="relative pl-10">
                   <button
                     onClick={() => toggleMilestone(milestone.id)}
