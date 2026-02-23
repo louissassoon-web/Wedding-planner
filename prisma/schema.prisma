@@ -1,0 +1,420 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTH & USERS
+// ============================================
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  name           String?
+  passwordHash   String?
+  image          String?
+  emailVerified  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  accounts       Account[]
+  sessions       Session[]
+  weddingMembers WeddingMember[]
+  notifications  Notification[]
+  tasks          Task[]          @relation("AssignedTasks")
+  createdTasks   Task[]          @relation("CreatedTasks")
+  documents      Document[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// WEDDING & ROLES
+// ============================================
+
+enum Role {
+  COUPLE
+  PLANNER
+  VENDOR
+}
+
+model Wedding {
+  id              String   @id @default(cuid())
+  name            String
+  date            DateTime?
+  venue           String?
+  estimatedGuests Int?
+  currency        String   @default("GBP")
+  dateFormat      String   @default("DD/MM/YYYY")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  members         WeddingMember[]
+  tasks           Task[]
+  taskCategories  TaskCategory[]
+  milestones      Milestone[]
+  guests          Guest[]
+  guestGroups     GuestGroup[]
+  budgetCategories BudgetCategory[]
+  budgetItems     BudgetItem[]
+  vendors         Vendor[]
+  tables          Table[]
+  documents       Document[]
+  documentFolders DocumentFolder[]
+  notifications   Notification[]
+
+  @@map("weddings")
+}
+
+model WeddingMember {
+  id              String   @id @default(cuid())
+  userId          String
+  weddingId       String
+  role            Role
+  canViewSpend    Boolean  @default(false)
+  canEditTasks    Boolean  @default(true)
+  canEditGuests   Boolean  @default(true)
+  canEditVendors  Boolean  @default(true)
+  canEditSeating  Boolean  @default(true)
+  invitedAt       DateTime @default(now())
+  acceptedAt      DateTime?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, weddingId])
+  @@map("wedding_members")
+}
+
+// ============================================
+// TASKS & CHECKLISTS
+// ============================================
+
+model TaskCategory {
+  id        String   @id @default(cuid())
+  weddingId String
+  name      String
+  color     String   @default("#D4A5A5")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@map("task_categories")
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  weddingId   String
+  categoryId  String?
+  title       String
+  description String?   @db.Text
+  dueDate     DateTime?
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  priority    Int       @default(0)
+  sortOrder   Int       @default(0)
+  assignedToId String?
+  createdById  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  wedding    Wedding       @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  category   TaskCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  assignedTo User?         @relation("AssignedTasks", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy  User?         @relation("CreatedTasks", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("tasks")
+}
+
+// ============================================
+// TIMELINE & MILESTONES
+// ============================================
+
+model Milestone {
+  id          String    @id @default(cuid())
+  weddingId   String
+  title       String
+  description String?   @db.Text
+  date        DateTime
+  completed   Boolean   @default(false)
+  icon        String?
+  color       String    @default("#D4A5A5")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+
+  @@map("milestones")
+}
+
+// ============================================
+// GUESTS & RSVP
+// ============================================
+
+model GuestGroup {
+  id        String   @id @default(cuid())
+  weddingId String
+  name      String
+  createdAt DateTime @default(now())
+
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  guests  Guest[]
+
+  @@map("guest_groups")
+}
+
+enum RsvpStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  MAYBE
+}
+
+model Guest {
+  id           String     @id @default(cuid())
+  weddingId    String
+  groupId      String?
+  tableId      String?
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  rsvpStatus   RsvpStatus @default(PENDING)
+  rsvpAt       DateTime?
+  plusOne      Boolean    @default(false)
+  plusOneName  String?
+  dietaryReqs  String?    @db.Text
+  notes        String?    @db.Text
+  address      String?    @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  wedding Wedding     @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  group   GuestGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  table   Table?      @relation(fields: [tableId], references: [id], onDelete: SetNull)
+
+  @@map("guests")
+}
+
+// ============================================
+// BUDGET & SPEND (Restricted Access)
+// ============================================
+
+model BudgetCategory {
+  id            String   @id @default(cuid())
+  weddingId     String
+  name          String
+  budgetAmount  Decimal  @default(0) @db.Decimal(10, 2)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  wedding Wedding      @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  items   BudgetItem[]
+
+  @@map("budget_categories")
+}
+
+enum PaymentStatus {
+  UNPAID
+  DEPOSIT_PAID
+  PARTIAL
+  PAID
+}
+
+model BudgetItem {
+  id           String        @id @default(cuid())
+  weddingId    String
+  categoryId   String?
+  vendorId     String?
+  name         String
+  description  String?       @db.Text
+  estimatedCost Decimal      @default(0) @db.Decimal(10, 2)
+  actualCost   Decimal       @default(0) @db.Decimal(10, 2)
+  paidAmount   Decimal       @default(0) @db.Decimal(10, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  dueDate      DateTime?
+  notes        String?       @db.Text
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  wedding  Wedding         @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  category BudgetCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  vendor   Vendor?         @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  payments Payment[]
+
+  @@map("budget_items")
+}
+
+model Payment {
+  id           String   @id @default(cuid())
+  budgetItemId String
+  amount       Decimal  @db.Decimal(10, 2)
+  paidAt       DateTime @default(now())
+  method       String?
+  reference    String?
+  notes        String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  budgetItem BudgetItem @relation(fields: [budgetItemId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ============================================
+// VENDORS
+// ============================================
+
+model Vendor {
+  id          String   @id @default(cuid())
+  weddingId   String
+  userId      String?
+  name        String
+  category    String?
+  email       String?
+  phone       String?
+  website     String?
+  address     String?  @db.Text
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  wedding     Wedding      @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  budgetItems BudgetItem[]
+
+  @@map("vendors")
+}
+
+// ============================================
+// SEATING
+// ============================================
+
+model Table {
+  id        String   @id @default(cuid())
+  weddingId String
+  name      String
+  capacity  Int      @default(10)
+  sortOrder Int      @default(0)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  guests  Guest[]
+
+  @@map("tables")
+}
+
+// ============================================
+// DOCUMENTS
+// ============================================
+
+model DocumentFolder {
+  id        String   @id @default(cuid())
+  weddingId String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  wedding   Wedding    @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@map("document_folders")
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  weddingId   String
+  folderId    String?
+  uploadedById String?
+  name        String
+  fileName    String
+  fileUrl     String   @db.Text
+  fileSize    Int?
+  mimeType    String?
+  createdAt   DateTime @default(now())
+
+  wedding    Wedding         @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  folder     DocumentFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploadedBy User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@map("documents")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+enum NotificationType {
+  TASK_DUE
+  TASK_ASSIGNED
+  RSVP_RECEIVED
+  PAYMENT_DUE
+  MILESTONE_UPCOMING
+  GENERAL
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  weddingId String
+  userId    String
+  type      NotificationType
+  title     String
+  message   String?          @db.Text
+  link      String?
+  read      Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  wedding Wedding @relation(fields: [weddingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@map("notifications")
+}

@@ -1,23 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: 45 33% 97%;
+    --foreground: 0 0% 24%;
+    --card: 45 33% 98%;
+    --card-foreground: 0 0% 24%;
+    --popover: 45 33% 98%;
+    --popover-foreground: 0 0% 24%;
+    --primary: 0 24% 74%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 120 14% 77%;
+    --secondary-foreground: 0 0% 24%;
+    --muted: 45 20% 92%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 45 30% 90%;
+    --accent-foreground: 0 0% 24%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 45 20% 88%;
+    --input: 45 20% 88%;
+    --ring: 0 24% 74%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 0 0% 8%;
+    --foreground: 45 20% 95%;
+    --card: 0 0% 10%;
+    --card-foreground: 45 20% 95%;
+    --popover: 0 0% 10%;
+    --popover-foreground: 45 20% 95%;
+    --primary: 0 24% 74%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 120 14% 30%;
+    --secondary-foreground: 45 20% 95%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 45 10% 65%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 45 20% 95%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 20%;
+    --input: 0 0% 20%;
+    --ring: 0 24% 74%;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif;
+  }
 }
 
 @layer utilities {
