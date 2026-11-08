@@ -294,6 +294,9 @@ export function RsvpLinks({
     [url, setUrl] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [inviteCode, setInviteCode] = useState(""),
+    [websiteUrl, setWebsiteUrl] = useState(""),
+    [detailsCopied, setDetailsCopied] = useState(false);
   const endpoint = planUrl("/api/invitations", planId);
   async function load() {
     try {
@@ -304,7 +307,14 @@ export function RsvpLinks({
     }
   }
   useEffect(() => {
-    if (!demo) void load();
+    if (!demo) {
+      void load();
+      void api<{ site: { url: string; enabled: boolean } | null }>(
+        planUrl("/api/guest-site", planId),
+      )
+        .then((d) => setWebsiteUrl(d.site?.enabled ? d.site.url : ""))
+        .catch(() => {});
+    }
   }, [planId, demo]);
   const households = [
     ...new Set(guests.map((g) => g.household).filter(Boolean)),
@@ -313,8 +323,8 @@ export function RsvpLinks({
     <div>
       <p className="helper-text">
         Create a link for a person or household. Anyone with that link can view
-        and update only those guests’ replies, meal choices and dietary notes.
-        Add each plus-one as a named guest first.
+        and update only those guests’ replies, meal choices, dietary and
+        accessibility notes. Add each plus-one as a named guest first.
       </p>
       {demo ? (
         <p className="form-error">
@@ -329,10 +339,16 @@ export function RsvpLinks({
               setError("");
               setUrl("");
               try {
-                const d = await api<{ url: string }>(endpoint, "POST", {
-                  guestIds: selected,
-                });
+                const d = await api<{ url: string; code: string }>(
+                  endpoint,
+                  "POST",
+                  {
+                    guestIds: selected,
+                  },
+                );
                 setUrl(d.url);
+                setInviteCode(d.code);
+                setDetailsCopied(false);
                 await load();
               } catch (e) {
                 setError((e as Error).message);
@@ -402,7 +418,56 @@ export function RsvpLinks({
               </small>
             </fieldset>
           </form>
-          {url && <CopyLink url={url} />}
+          {url && (
+            <>
+              <CopyLink url={url} />
+              <div className="invitation-code-box">
+                <p className="eyebrow">FOR PRINTED INVITATIONS</p>
+                <strong>Household invitation code</strong>
+                <code>{inviteCode}</code>
+                {websiteUrl ? (
+                  <>
+                    <label className="field">
+                      <span>Wedding website</span>
+                      <input
+                        readOnly
+                        value={websiteUrl}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    </label>
+                    <button
+                      className="button secondary"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(
+                            [
+                              "We’d love you to join us.",
+                              websiteUrl,
+                              "Your invitation code: " + inviteCode,
+                            ].join("\n"),
+                          );
+                          setDetailsCopied(true);
+                        } catch {
+                          setDetailsCopied(false);
+                        }
+                      }}
+                    >
+                      {detailsCopied ? "Copied" : "Copy invitation details"}
+                    </button>
+                  </>
+                ) : (
+                  <a className="text-link" href="/dashboard/guest-website">
+                    Publish your shared wedding website
+                  </a>
+                )}
+                <small>
+                  Use the website address and code on a printed invite, or share
+                  the personal link above. Copy now: the code is only shown
+                  once.
+                </small>
+              </div>
+            </>
+          )}
           <h3 className="spaced-heading">Your invitations</h3>
           {invites.map((i) => (
             <div className="share-row" key={i.id}>

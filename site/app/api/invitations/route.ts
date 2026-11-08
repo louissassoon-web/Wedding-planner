@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { newInviteCode, codeHash } from "@/lib/server-invitations";
+import { formatInviteCode } from "@/lib/guest-site";
 import {
   context,
   db,
@@ -42,6 +44,7 @@ export async function POST(req: Request) {
       )
     )
       throw new HttpError("Choose active guests from this wedding.");
+    const code = newInviteCode();
     const token = newToken(),
       id = crypto.randomUUID(),
       expires = new Date(
@@ -55,7 +58,7 @@ export async function POST(req: Request) {
       ).toISOString();
     await db()
       .prepare(
-        "INSERT INTO wedding_invites (id,plan_id,kind,guest_ids,token_hash,expires_at,created_at) VALUES (?,?,?,?,?,?,?)",
+        "INSERT INTO wedding_invites (id,plan_id,kind,guest_ids,token_hash,expires_at,created_at,code_hash) VALUES (?,?,?,?,?,?,?,?)",
       )
       .bind(
         id,
@@ -65,11 +68,13 @@ export async function POST(req: Request) {
         await tokenHash(token),
         expires,
         new Date().toISOString(),
+        await codeHash(c.plan, code),
       )
       .run();
     await audit(c.plan, c.email, "Created a guest RSVP link");
     return json({
       id,
+      code: formatInviteCode(code),
       url: new URL("/rsvp", req.url).origin + "/rsvp#" + token,
       expires,
     });

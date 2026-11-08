@@ -1,10 +1,12 @@
-# Wedding Planner
+# Marigold Wedding Planner
 
 The improved hosted wedding planner lives in [`site/`](site/README.md).
 
 **[Open the live app](https://our-wedding-planner.workspace-710372.chatgpt.site)** — wedding plans require ChatGPT sign-in.
 
-It adds persistent private storage, a responsive redesign, shared planning roles and invitations, household RSVP links, payment instalments and calendar reminders, supplier records, seating assignments, timelines, file uploads, CSV exports and reversible archiving. All navigation uses normal page links after fixing a production client-routing failure.
+It adds persistent private storage, a responsive redesign, shared planning roles and invitations, a Marigold-branded guest website with household RSVP codes and links, dietary and accessibility replies, payment instalments and calendar reminders, supplier records, seating assignments, timelines, file uploads, CSV exports and reversible archiving. All navigation uses normal page links after fixing a production client-routing failure.
+
+The guest website uses the supplied Marigold moodboard identity and offers editable wedding information, FAQs and optional RSVP questions. Its RSVP deadline stays exactly 16 weeks before the wedding date.
 
 The site hosting audience is controlled separately. Guest and collaborator links work externally when visitors are allowed; server-side sign-in, membership and invitation checks continue to protect wedding data.
 

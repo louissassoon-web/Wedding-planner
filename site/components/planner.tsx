@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { Dialog } from "radix-ui";
 import {
   Heart,
+  Globe2,
   LayoutDashboard,
   CheckSquare2,
   Users,
@@ -53,6 +54,7 @@ import {
   documentSchema,
   stateSchema,
   today,
+  rsvpDeadlineFor,
   type Collection,
   type Document,
   type Expense,
@@ -62,6 +64,8 @@ import {
   type Task,
 } from "@/lib/planner";
 
+import { GuestSiteEditor } from "./guest-site-editor";
+import { MarigoldMark } from "./marigold-mark";
 import type { Role } from "@/lib/access";
 import { TeamPanel, RsvpLinks, planUrl } from "./sharing";
 import { PaymentSchedule } from "./payment-schedule";
@@ -77,11 +81,13 @@ type Page =
   | "timeline"
   | "documents"
   | "settings"
-  | "notifications";
+  | "notifications"
+  | "guest-website";
 const nav = [
   { id: "overview", name: "Overview", icon: LayoutDashboard },
   { id: "tasks", name: "Checklist", icon: CheckSquare2 },
   { id: "guests", name: "Guest list", icon: Users },
+  { id: "guest-website", name: "Guest website", icon: Globe2 },
   { id: "budget", name: "Budget", icon: Wallet },
   { id: "vendors", name: "Suppliers", icon: Store },
   { id: "seating", name: "Seating plan", icon: Armchair },
@@ -99,6 +105,7 @@ const urls: Record<Page, string> = {
   documents: "/dashboard/documents",
   settings: "/dashboard/settings",
   notifications: "/dashboard/notifications",
+  "guest-website": "/dashboard/guest-website",
 };
 const categories = [
   "Planning",
@@ -146,6 +153,10 @@ const titles: Record<Page, [string, string]> = {
   documents: [
     "The details, kept together",
     "Contracts, quotes and the things you’ll want to find again.",
+  ],
+  "guest-website": [
+    "A little welcome, a lot of love.",
+    "Your wedding details and guest replies, beautifully together.",
   ],
   settings: ["Make it yours", "Your wedding details, preferences and data."],
   notifications: [
@@ -312,6 +323,12 @@ const defaults: Record<
     rsvp: "pending",
     meal: "",
     dietary: "",
+    accessibility: "",
+    transport: "",
+    songRequest: "",
+    message: "",
+    replyEmail: "",
+    replyPhone: "",
     table: "",
     notes: "",
   },
@@ -361,6 +378,7 @@ export default function Planner() {
       "documents",
       "settings",
       "notifications",
+      "guest-website",
     ].includes(segment || "")
       ? segment
       : "overview"
@@ -680,6 +698,12 @@ export default function Planner() {
           "RSVP",
           "Meal",
           "Dietary",
+          "Accessibility",
+          "Transport",
+          "Song request",
+          "Guest message",
+          "Reply email",
+          "Reply phone",
           "Table",
           "Notes",
         ],
@@ -691,6 +715,12 @@ export default function Planner() {
           g.rsvp,
           g.meal,
           g.dietary,
+          g.accessibility,
+          g.transport,
+          g.songRequest,
+          g.message,
+          g.replyEmail,
+          g.replyPhone,
           tables.find((t) => t.id === g.table)?.name || "",
           g.notes,
         ]),
@@ -756,8 +786,8 @@ export default function Planner() {
     return (
       <div className="welcome-screen">
         <div className="brand">
-          <Heart size={24} />
-          <span>Our Wedding</span>
+          <MarigoldMark size={28} />
+          <span>Marigold</span>
         </div>
         <p className="eyebrow">LESS ADMIN. MORE ANTICIPATION.</p>
         <h1>
@@ -1435,7 +1465,9 @@ export default function Planner() {
                             >
                               {g.name}
                             </button>
-                            <small>{g.email || "No email added"}</small>
+                            <small>
+                              {g.replyEmail || g.email || "No email added"}
+                            </small>
                           </td>
                           <td data-label="RSVP">
                             <select
@@ -2056,6 +2088,18 @@ export default function Planner() {
               </section>
             </>
           )}
+          {page === "guest-website" && (
+            <GuestSiteEditor
+              state={state}
+              planId={planId}
+              busy={busy}
+              demo={demo}
+              canManage={canManage}
+              onSave={async (guestSite) =>
+                commit({ ...state, guestSite }, "Guest website details saved")
+              }
+            />
+          )}
           {page === "settings" && (
             <>
               <div className="settings-columns">
@@ -2351,9 +2395,9 @@ export default function Planner() {
     return (
       <>
         <a href="/" className="brand" onClick={() => setMobile(false)}>
-          <Heart size={25} strokeWidth={1.5} />
+          <MarigoldMark size={28} />
           <span>
-            Our Wedding<small>ALL THE LITTLE DETAILS</small>
+            Marigold<small>YOUR WEDDING, COMING TOGETHER</small>
           </span>
         </a>
         <div className="wedding-label">
@@ -2594,7 +2638,21 @@ function Editor({
         label: "Dietary requirements & allergies",
         type: "textarea",
       },
-      { name: "notes", label: "Notes", type: "textarea" },
+      { name: "accessibility", label: "Accessibility needs", type: "textarea" },
+      {
+        name: "transport",
+        label: "Arranged transport",
+        options: [
+          { value: "", label: "Not specified" },
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+        ],
+      },
+      { name: "replyEmail", label: "Guest reply email", type: "email" },
+      { name: "replyPhone", label: "Guest reply phone", type: "tel" },
+      { name: "songRequest", label: "Song request" },
+      { name: "message", label: "Message from guest", type: "textarea" },
+      { name: "notes", label: "Planning notes (private)", type: "textarea" },
     ],
     expenses: [
       { name: "name", label: "Expense name", required: true },
@@ -2878,6 +2936,7 @@ function SettingsForm({
               <label className="field" key={f.name}>
                 <span>{f.label}</span>
                 <input
+                  readOnly={f.name === "rsvpDeadline"}
                   type={f.type || "text"}
                   required={f.required}
                   min={f.type === "number" ? 0 : undefined}
@@ -2888,7 +2947,11 @@ function SettingsForm({
                         ? 1
                         : undefined
                   }
-                  value={form[f.name as keyof typeof form]}
+                  value={
+                    f.name === "rsvpDeadline"
+                      ? rsvpDeadlineFor(form.date)
+                      : form[f.name as keyof typeof form]
+                  }
                   onInput={(e) => {
                     if (f.type === "date")
                       setForm({ ...form, [f.name]: e.currentTarget.value });
@@ -2903,6 +2966,9 @@ function SettingsForm({
                     })
                   }
                 />
+                {f.name === "rsvpDeadline" && (
+                  <small>Automatically 16 weeks before your wedding.</small>
+                )}
               </label>
             ))}
           </div>

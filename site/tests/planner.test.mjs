@@ -217,3 +217,70 @@ test("planner role receives no finances or documents and cannot replace private 
   assert.throws(() => permittedUpdate(s, s, "planner"));
   assert.throws(() => permittedUpdate(s, s, "viewer"));
 });
+
+const { rsvpDeadlineFor } = await import("../lib/planner.ts");
+const {
+  publicWedding,
+  publicGuest,
+  normaliseInviteCode,
+  formatInviteCode,
+  weddingCalendar,
+} = await import("../lib/guest-site.ts");
+test("RSVP deadline always follows the wedding by exactly 16 weeks, including leap years", () => {
+  assert.equal(rsvpDeadlineFor("2027-09-04"), "2027-05-15");
+  for (const day of ["2027-09-04", "2028-02-29", "2028-01-01"])
+    assert.equal(dayDistance(day, rsvpDeadlineFor(day)), 112);
+  const s = emptyState();
+  s.settings.date = "2027-09-04";
+  s.settings.rsvpDeadline = "2027-09-04";
+  assert.equal(stateSchema.parse(s).settings.rsvpDeadline, "2027-05-15");
+  s.settings.date = "2028-02-29";
+  assert.equal(
+    dayDistance(s.settings.date, stateSchema.parse(s).settings.rsvpDeadline),
+    112,
+  );
+  assert.equal(rsvpDeadlineFor(""), "");
+});
+test("old plans and guest records receive safe new defaults; public projection excludes private planning data", () => {
+  const legacy = demoState();
+  delete legacy.guestSite;
+  for (const g of legacy.guests) {
+    for (const k of [
+      "accessibility",
+      "transport",
+      "songRequest",
+      "message",
+      "replyEmail",
+      "replyPhone",
+    ])
+      delete g[k];
+  }
+  const parsed = stateSchema.parse(legacy);
+  assert.equal(parsed.guestSite.contactEmail, "");
+  assert.equal(parsed.guests[0].replyEmail, "");
+  const publicData = publicWedding(parsed);
+  assert.equal(publicData.budget, undefined);
+  assert.equal(publicData.guests, undefined);
+  assert.equal(publicData.expenses, undefined);
+  const guest = publicGuest({
+    ...parsed.guests[0],
+    email: "private@example.test",
+    notes: "Private note",
+  });
+  assert.equal(guest.email, undefined);
+  assert.equal(guest.notes, undefined);
+  assert.equal(guest.table, undefined);
+  assert.equal(normaliseInviteCode("abcd-efgh jklm"), "ABCDEFGHJKLM");
+  assert.equal(formatInviteCode("abcdefghjklm"), "ABCD-EFGH-JKLM");
+});
+test("guest calendar uses the actual wedding date and escaped public venue information", () => {
+  const s = emptyState();
+  s.settings.date = "2027-09-04";
+  s.settings.name = "A & B";
+  s.settings.venue = "Garden, Room; 1";
+  const cal = weddingCalendar(publicWedding(s));
+  assert.match(cal, /DTSTART;VALUE=DATE:20270904/);
+  assert.match(cal, /DTEND;VALUE=DATE:20270905/);
+  assert.match(cal, /Garden\\, Room\\; 1/);
+  assert.ok(cal.split("\r\n").every((l) => Buffer.byteLength(l) <= 75));
+});

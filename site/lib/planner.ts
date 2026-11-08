@@ -1,4 +1,12 @@
 import { z } from "zod";
+import { guestSiteSchema } from "./guest-site-schema.ts";
+export function rsvpDeadlineFor(weddingDate: string) {
+  return weddingDate
+    ? new Date(Date.parse(weddingDate + "T12:00:00Z") - 16 * 7 * 86400000)
+        .toISOString()
+        .slice(0, 10)
+    : "";
+}
 
 const text = z.string().trim().max(200);
 const note = z.string().max(4000);
@@ -36,6 +44,14 @@ export const guestSchema = z.object({
   rsvp: z.enum(["pending", "confirmed", "declined", "maybe"]),
   meal: text,
   dietary: note,
+  accessibility: note.default(""),
+  transport: z.enum(["", "yes", "no"]).default(""),
+  songRequest: text.default(""),
+  message: note.default(""),
+  replyEmail: z
+    .union([z.literal(""), z.string().trim().email().max(200)])
+    .default(""),
+  replyPhone: text.default(""),
   table: text,
   notes: note,
 });
@@ -141,20 +157,26 @@ export const documentSchema = z.object({
   type: text,
   folder: text,
 });
-export const settingsSchema = z.object({
-  name: text.min(1),
-  partner1: text,
-  partner2: text,
-  date,
-  venue: text,
-  budget: money,
-  guestTarget: z.number().int().min(0).max(10000),
-  rsvpDeadline: date,
-});
+export const settingsSchema = z
+  .object({
+    name: text.min(1),
+    partner1: text,
+    partner2: text,
+    date,
+    venue: text,
+    budget: money,
+    guestTarget: z.number().int().min(0).max(10000),
+    rsvpDeadline: date,
+  })
+  .transform((settings) => ({
+    ...settings,
+    rsvpDeadline: rsvpDeadlineFor(settings.date),
+  }));
 export const stateSchema = z
   .object({
     schemaVersion: z.literal(1),
     settings: settingsSchema,
+    guestSite: guestSiteSchema.default({}),
     tasks: z.array(taskSchema).max(2000),
     guests: z.array(guestSchema).max(2000),
     expenses: z.array(expenseSchema).max(1000),
@@ -228,6 +250,7 @@ export type Item =
   | Document;
 export const emptyState = (): PlannerState => ({
   schemaVersion: 1,
+  guestSite: guestSiteSchema.parse({}),
   settings: {
     name: "Our Wedding",
     partner1: "",
@@ -380,6 +403,12 @@ export function demoState(): PlannerState {
     "Isla Martin",
     "Theo Wilson",
   ].map((name, i) => ({
+    accessibility: "",
+    transport: "" as const,
+    songRequest: "",
+    message: "",
+    replyEmail: "",
+    replyPhone: "",
     id: "d-g" + i,
     name,
     email: "",

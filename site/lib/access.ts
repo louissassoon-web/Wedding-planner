@@ -23,6 +23,7 @@ export function permittedUpdate(
     return {
       ...next,
       settings: current.settings,
+      guestSite: current.guestSite,
       expenses: current.expenses,
       documents: current.documents,
     };

@@ -1,8 +1,8 @@
-# Our Wedding
+# Marigold
 
-A calm, private wedding planner with real saved tasks, guests, budgets, suppliers, seating, documents and timelines.
+An ivory-and-marigold wedding planner with real saved tasks, guests, budgets, suppliers, seating, documents and timelines.
 
-Hosted at https://our-wedding-planner.workspace-710372.chatgpt.site. Planner records require ChatGPT sign-in and wedding membership; RSVP pages require a private invitation token. The Sites audience is managed separately and must allow visitors for external invitation links to work.
+Hosted at https://our-wedding-planner.workspace-710372.chatgpt.site. Planner records require ChatGPT sign-in and wedding membership; The guest website shares confirmed wedding details; RSVP replies require a private household code or invitation token. The Sites audience is managed separately and must allow visitors for external invitation links to work.
 
 See [the product review and Reddit research](docs/product-review.md) for the original app audit, implemented improvements and next priorities.
 
@@ -17,7 +17,7 @@ The prototype's disconnected Next.js/React screens have been replaced with a Nex
 - `db/schema.ts` and `drizzle/`: D1 schema and migration
 - `.openai/hosting.json`: Site identity and DB/BUCKET bindings
 
-There is no local-storage fallback for user records and no hard-coded production test user. Local storage holds only the selected wedding ID; session storage holds only an explicitly opened fictional sample. Owners invite full editors, logistics planners (no budget/documents), or read-only viewers. Every API enforces membership and role checks. Planner writes use revision compare-and-swap. Guest replies merge only the invited guests’ RSVP, meal and dietary fields into the latest plan. Raw invitation tokens are shown once and stored only as SHA-256 hashes on the server.
+There is no local-storage fallback for user records and no hard-coded production test user. Local storage holds only the selected wedding ID; session storage holds only an explicitly opened fictional sample. Owners invite full editors, logistics planners (no budget/documents), or read-only viewers. Every API enforces membership and role checks. Planner writes use revision compare-and-swap. Guest replies merge only the invited guests’ attendance, meal, dietary, accessibility, transport, song, message and optional reply-contact fields into the latest plan. Private planning notes and stored contacts are never exposed. Raw invitation codes and tokens are shown once and stored only as SHA-256 hashes on the server.
 
 ## Development
 
@@ -51,3 +51,11 @@ Exported JSON includes planning records and document metadata, not document byte
 `node tests/features-api.mjs` runs against a disposable built local Worker on `127.0.0.1:8788`, with the migrations applied to its separate `.wrangler/feature-tests` state. It emulates Sites identity headers on loopback only; never point it at production. Checks include every role, membership revocation, email-bound invitation acceptance, scoped document access, household RSVP isolation, forbidden field injection, guest-seat changes, origin checks and concurrent save conflicts.
 
 Navigation intentionally uses normal anchors: the production Vinext client-link handler previously threw on navigation even though development navigation worked. Sample mode survives these full-page navigations in session storage.
+
+## Guest website and branding
+
+The guest website takes its orange, marigold, pink and ivory palette, floral accent and italic serif styling from the supplied Marigold moodboard. Its supplied floral reference image is credited in `public/brand/credits.txt`. Owners and full editors manage its welcome, timings, travel, accommodation, dress code, contact, FAQs and RSVP questions from **Guest website**. Unknown details remain TBC. Publication creates a stable `/wedding/<public-id>` link; pausing preserves the address. Planner access remains private.
+
+**Guest list → RSVP links** creates a named-household invitation with a printable code and a personal link. Codes are shown once and stored as hashes. Replies can be updated and appear in the guest list and CSV exports. The RSVP deadline always derives from the wedding date minus 16 weeks (112 days). The page also offers an all-day calendar download. Pausing the common website disables code access; personal invitation links must be withdrawn separately.
+
+`node tests/guest-website-api.mjs` uses the same disposable local Worker as the integration suite, with all migrations applied. It covers anonymous publication, household-code isolation, full replies, validation, private-field preservation, pause/resume and revocation.

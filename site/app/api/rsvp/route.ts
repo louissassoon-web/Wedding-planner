@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { stateSchema } from "@/lib/planner";
+import { publicWedding, publicGuest } from "@/lib/guest-site";
+import { findRsvpInvitation } from "@/lib/server-invitations";
 import {
   db,
   readPlan,
@@ -17,50 +19,30 @@ const response = z
     rsvp: z.enum(["confirmed", "declined", "maybe"]),
     meal: z.string().trim().max(200),
     dietary: z.string().max(4000),
+    accessibility: z.string().max(4000).optional(),
+    transport: z.enum(["", "yes", "no"]).optional(),
+    songRequest: z.string().trim().max(200).optional(),
+    message: z.string().max(4000).optional(),
+    replyEmail: z
+      .union([z.literal(""), z.string().trim().email().max(200)])
+      .optional(),
+    replyPhone: z.string().trim().max(200).optional(),
   })
   .strict();
 export async function POST(req: Request) {
   try {
     const input = await body(req);
-    const hash = await tokenHash(String(input.token || ""));
-    const invite = await db()
-      .prepare(
-        "SELECT id,plan_id,guest_ids,expires_at,last_submitted FROM wedding_invites WHERE token_hash=? AND kind='rsvp' AND revoked=0 AND expires_at>?",
-      )
-      .bind(hash, new Date().toISOString())
-      .first<{
-        id: string;
-        plan_id: string;
-        guest_ids: string;
-        expires_at: string;
-        last_submitted: string | null;
-      }>();
-    if (!invite)
-      throw new HttpError(
-        "This RSVP link has expired or was withdrawn. Please contact the couple.",
-        404,
-      );
+    const invite = await findRsvpInvitation(input);
     const ids = JSON.parse(invite.guest_ids) as string[];
     if (input.action === "read") {
       const p = await readPlan(invite.plan_id);
       const guests = p.state.guests
         .filter((g) => ids.includes(g.id) && !g.archived)
-        .map((g) => ({
-          id: g.id,
-          name: g.name,
-          rsvp: g.rsvp,
-          meal: g.meal,
-          dietary: g.dietary,
-        }));
+        .map(publicGuest);
       if (!guests.length)
         throw new HttpError("This invitation is no longer active.", 410);
       return json({
-        wedding: {
-          name: p.state.settings.name,
-          date: p.state.settings.date,
-          venue: p.state.settings.venue,
-          deadline: p.state.settings.rsvpDeadline,
-        },
+        wedding: publicWedding(p.state),
         guests,
         submittedAt: invite.last_submitted,
       });
@@ -76,7 +58,19 @@ export async function POST(req: Request) {
         403,
       );
     for (let attempt = 0; attempt < 3; attempt++) {
+      await findRsvpInvitation(input);
       const p = await readPlan(invite.plan_id);
+      if (
+        p.state.guestSite.mealOptions.length &&
+        replies.some(
+          (r) =>
+            r.rsvp === "confirmed" &&
+            !p.state.guestSite.mealOptions.includes(r.meal),
+        )
+      )
+        throw new HttpError(
+          "Please choose a meal for each guest who is attending.",
+        );
       const activeIds = p.state.guests
         .filter((g) => ids.includes(g.id) && !g.archived)
         .map((g) => g.id);

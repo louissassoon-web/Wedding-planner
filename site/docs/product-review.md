@@ -32,7 +32,7 @@ Sources:
 ## Implemented
 
 - Private ChatGPT sign-in and user-scoped D1 persistence. No demo password or public write endpoint. Saves reject stale revisions instead of silently overwriting another tab.
-- A warm ivory/forest/sage design retaining the original calm, wedding-specific character. Responsive sidebar/menu, focused overview, larger contrast-safe secondary text, phone-friendly guest/expense cards, labelled controls and focus-managed dialogs.
+- A Marigold moodboard identity: ivory, marigold and Aperol orange, a restrained pink accent, italic serif headings and floral imagery. Responsive sidebar/menu, focused overview, larger contrast-safe secondary text, phone-friendly guest/expense cards, labelled controls and focus-managed dialogs.
 - Dashboard totals and countdown derived from saved records and actual date; next tasks and payment balances link directly to editing.
 - Editable tasks with owners, categories, priorities, due dates, completion and optional starter checklist. Adding a checklist does not make suggested tasks overdue immediately. Changing the wedding date does not silently reschedule existing commitments.
 - Guests with households, manual RSVPs, meal choices, dietary notes, CSV import preview, duplicate detection and CSV exports protected against spreadsheet formula injection. Plus-ones are named guest rows, avoiding double counts.
@@ -50,9 +50,16 @@ Sources:
 - Payment instalment schedules with paid dates, receipt references and next-due totals. Existing paid amounts carry into the ledger without invented dates. Calendar export includes a separate event per unpaid instalment and alarms 7 days and 1 day before. This is a snapshot, not an automatically updating feed or email delivery service.
 - Fixed the production navigation failure: normal page links replace the failing client routing handler, including on mobile.
 
+## Marigold and guest website
+
+- A branded guest website with one public wedding link and individual household codes, plus the existing personal RSVP links. Only the wedding details are public; guest names and replies require an invitation.
+- Attendance, optional contact details, meal choices, allergies, accessibility needs, song requests and messages; an optional transport question. Replies feed directly into the planner and exports.
+- Editable welcome, ceremony/reception timings, travel, parking, accommodation, dress code, children/gifts notes and FAQs. Unconfirmed details stay TBC. Owners and full editors can publish or pause the website.
+- RSVP deadline automatically follows the wedding date by 16 weeks; an all-day wedding calendar download uses the confirmed date.
+
 ## Further improvements
 
-1. **Richer RSVPs.** Per-event guest eligibility and attendance, structured menu courses and optional contact collection.
+1. **Richer RSVPs.** Per-event guest eligibility and attendance, and structured multi-course menus.
 2. **Live reminder delivery.** Calendar subscriptions or an opt-in email service with delivery tracking, beyond the current calendar export.
 3. **Backup restore and better handoffs.** Add a validated restore preview, printable catering/table packs, and an iCalendar timeline. The current JSON export contains records and document metadata, not document bytes.
 4. **Richer planning only after the above.** Multi-day events with per-event guest eligibility, checklist templates chosen by wedding type/region, and a seating floor plan with keyboard alternatives. Avoid an overwhelming default checklist or paid-supplier marketplace.

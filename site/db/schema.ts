@@ -21,6 +21,7 @@ export const invites = sqliteTable("wedding_invites", {
   role: text("role").notNull().default(""),
   guestIds: text("guest_ids").notNull().default("[]"),
   tokenHash: text("token_hash").notNull(),
+  codeHash: text("code_hash").notNull().default(""),
   expiresAt: text("expires_at").notNull(),
   revoked: integer("revoked").notNull().default(0),
   acceptedBy: text("accepted_by"),
@@ -33,4 +34,11 @@ export const activity = sqliteTable("wedding_activity", {
   actor: text("actor").notNull(),
   action: text("action").notNull(),
   createdAt: text("created_at").notNull(),
+});
+
+export const guestSites = sqliteTable("wedding_guest_sites", {
+  planId: text("plan_id").primaryKey(),
+  publicId: text("public_id").notNull().unique(),
+  enabled: integer("enabled").notNull().default(1),
+  updatedAt: text("updated_at").notNull(),
 });
