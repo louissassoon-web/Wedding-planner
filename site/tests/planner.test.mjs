@@ -102,3 +102,118 @@ test("duplicate IDs are rejected to avoid updating two guests at once", () => {
   s.expenses = [expense, expense];
   assert.equal(stateSchema.safeParse(s).success, false);
 });
+
+const { startingSchedule, scheduledExpense, pendingPayments, paymentCalendar } =
+  await import("../lib/payments.ts");
+const { visiblePlan, permittedUpdate } = await import("../lib/access.ts");
+test("legacy deposits are retained when creating a schedule; due dates follow unpaid instalments", () => {
+  const legacy = { ...expense, paid: 1000, due: "2030-03-01" };
+  const rows = startingSchedule(legacy);
+  assert.equal(rows[0].amount, 1000);
+  assert.equal(rows[0].paidOn, "");
+  assert.equal(rows[1].amount, 4000);
+  const next = scheduledExpense(legacy, rows);
+  assert.equal(next.paid, 1000);
+  assert.equal(next.due, "2030-03-01");
+  rows[1].paid = true;
+  rows[1].paidOn = "2030-03-01";
+  const paid = scheduledExpense(legacy, rows);
+  assert.equal(paid.paid, 5000);
+  assert.equal(paid.due, "");
+  assert.equal(pendingPayments([paid]).length, 0);
+  const s = emptyState();
+  s.expenses = [legacy];
+  assert.deepEqual(stateSchema.parse(s).expenses[0].schedule, []);
+});
+test("payment schedules reject over-allocation, duplicate IDs and inconsistent paid totals", () => {
+  const rows = [
+    {
+      id: "p",
+      label: "Deposit",
+      amount: 1000,
+      due: "2030-01-01",
+      paid: true,
+      paidOn: "2030-01-01",
+      receiptId: "",
+    },
+    {
+      id: "p2",
+      label: "Balance",
+      amount: 4000,
+      due: "2030-03-01",
+      paid: false,
+      paidOn: "",
+      receiptId: "",
+    },
+  ];
+  const next = scheduledExpense(expense, rows),
+    s = emptyState();
+  s.expenses = [next];
+  assert.ok(stateSchema.safeParse(s).success);
+  for (const broken of [
+    { ...next, paid: 1001 },
+    { ...next, due: "2030-01-01" },
+    { ...next, schedule: [rows[0], { ...rows[1], amount: 4001 }] },
+    { ...next, schedule: [rows[0], { ...rows[1], id: "p" }] },
+  ]) {
+    s.expenses = [broken];
+    assert.equal(stateSchema.safeParse(s).success, false);
+  }
+});
+test("calendar contains each unpaid instalment, escaped titles, stable IDs and two alarms", () => {
+  const s = emptyState();
+  s.expenses = [
+    scheduledExpense(
+      { ...expense, name: "Venue, garden; north\\south\nRoom" },
+      [
+        {
+          id: "p",
+          label: "Balance",
+          amount: 5000,
+          due: "2030-03-01",
+          paid: false,
+          paidOn: "",
+          receiptId: "",
+        },
+      ],
+    ),
+  ];
+  const cal = paymentCalendar(s, new Date("2029-01-01T00:00:00Z"));
+  assert.match(cal, /UID:a-p@our-wedding-planner/);
+  assert.match(cal, /DTSTART;VALUE=DATE:20300301/);
+  assert.match(cal, /DTEND;VALUE=DATE:20300302/);
+  assert.match(cal, /TRIGGER:-P7D/);
+  assert.match(cal, /TRIGGER:-P1D/);
+  assert.match(cal, /Venue\\, garden\\; north\\\\south\\nRoom/);
+  assert.ok(cal.endsWith("END:VCALENDAR\r\n"));
+  assert.ok(cal.split("\r\n").every((l) => Buffer.byteLength(l) <= 75));
+});
+test("planner role receives no finances or documents and cannot replace private details", () => {
+  const s = emptyState();
+  s.expenses = [{ ...expense, schedule: [] }];
+  s.documents = [
+    {
+      id: "doc",
+      name: "contract",
+      key: "owner/doc",
+      size: 1,
+      type: "text/plain",
+      folder: "Contracts",
+      archived: false,
+    },
+  ];
+  const view = visiblePlan(s, "planner");
+  assert.equal(view.settings.budget, 0);
+  assert.deepEqual(view.expenses, []);
+  assert.deepEqual(view.documents, []);
+  const merged = permittedUpdate(
+    s,
+    { ...view, settings: { ...view.settings, budget: 999 } },
+    "planner",
+  );
+  assert.equal(merged.settings.budget, s.settings.budget);
+  assert.deepEqual(merged.expenses, s.expenses);
+  assert.deepEqual(merged.documents, s.documents);
+  assert.throws(() => permittedUpdate(s, s, "planner"));
+  assert.throws(() => permittedUpdate(s, s, "viewer"));
+});

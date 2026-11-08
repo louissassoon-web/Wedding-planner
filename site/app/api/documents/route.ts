@@ -1,10 +1,17 @@
 import { env } from "cloudflare:workers";
 import type { PlannerState } from "@/lib/planner";
+import { context, failure, HttpError } from "@/lib/server-plan";
 export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
-  const user = request.headers.get("oai-authenticated-user-id");
-  if (!user)
-    return Response.json({ error: "Please sign in." }, { status: 401 });
+  let user: string;
+  try {
+    const c = await context(request);
+    if (c.role === "planner" || c.role === "viewer")
+      throw new HttpError("Your role cannot upload documents.", 403);
+    user = c.plan;
+  } catch (e) {
+    return failure(e);
+  }
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin)
     return Response.json({ error: "Invalid origin" }, { status: 403 });
@@ -41,8 +48,15 @@ export async function POST(request: Request) {
   });
 }
 export async function GET(request: Request) {
-  const user = request.headers.get("oai-authenticated-user-id");
-  if (!user) return new Response("Please sign in", { status: 401 });
+  let user: string;
+  try {
+    const c = await context(request);
+    if (c.role === "planner")
+      throw new HttpError("Documents are not shared with this role.", 403);
+    user = c.plan;
+  } catch (e) {
+    return failure(e);
+  }
   const id = new URL(request.url).searchParams.get("id");
   const row = await env
     .DB!.prepare("SELECT data FROM wedding_plans WHERE user_id = ?")

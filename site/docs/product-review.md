@@ -43,16 +43,22 @@ Sources:
 - Real private document upload/download with a 10 MB limit. Documents are checked against the signed-in user's plan and downloaded as attachments.
 - Reversible archiving, a JSON data export, in-app reminders, and a clearly labelled sample that never saves over a real wedding.
 
-## Recommended next
+## Follow-ups implemented
 
-1. **Shared couple/planner workspace.** Add explicit membership and role-based authorisation, invitations, an activity log and safe concurrent editing. Task ownership currently organises work; it does not give another account access. Do not share passwords.
-2. **Guest-facing RSVP collection.** A simple invitation-specific link, household confirmation, per-event attendance, editable replies, meal courses and contact collection. Keep the private planner inaccessible to guests.
-3. **Payment instalments and reminders.** Replace aggregate paid totals with a ledger of deposits, instalments, due dates and receipts; offer opt-in email/calendar reminders and delivery tracking.
-4. **Backup restore and better handoffs.** Add a validated restore preview, printable catering/table packs, and an iCalendar timeline. The current JSON export contains records and document metadata, not document bytes.
-5. **Richer planning only after the above.** Multi-day events with per-event guest eligibility, checklist templates chosen by wedding type/region, and a seating floor plan with keyboard alternatives. Avoid an overwhelming default checklist or paid-supplier marketplace.
+- Shared wedding membership with full editor, logistics planner and read-only roles; email-bound, expiring invitations; revocation; activity history; wedding switching; and protected concurrent saves. Invitations are copied and sent by the owner; the app sends no email.
+- Guest-facing household RSVP links with editable replies, meal preferences and dietary notes. Only the named people and wedding invitation details are exposed. Tokens are hashed, expiring and revocable; RSVP updates preserve unrelated records and clear declined guests’ seats. External links require the Site audience to allow visitors while app-level membership continues protecting the planner.
+- Payment instalment schedules with paid dates, receipt references and next-due totals. Existing paid amounts carry into the ledger without invented dates. Calendar export includes a separate event per unpaid instalment and alarms 7 days and 1 day before. This is a snapshot, not an automatically updating feed or email delivery service.
+- Fixed the production navigation failure: normal page links replace the failing client routing handler, including on mobile.
+
+## Further improvements
+
+1. **Richer RSVPs.** Per-event guest eligibility and attendance, structured menu courses and optional contact collection.
+2. **Live reminder delivery.** Calendar subscriptions or an opt-in email service with delivery tracking, beyond the current calendar export.
+3. **Backup restore and better handoffs.** Add a validated restore preview, printable catering/table packs, and an iCalendar timeline. The current JSON export contains records and document metadata, not document bytes.
+4. **Richer planning only after the above.** Multi-day events with per-event guest eligibility, checklist templates chosen by wedding type/region, and a seating floor plan with keyboard alternatives. Avoid an overwhelming default checklist or paid-supplier marketplace.
 
 ## Verification and limits
 
 Automated tests cover budgets, invalid values/dates, guest CSV escaping/parsing, seating constraints, checklist dates and duplicate IDs. Local API smoke tests cover sign-in, persistence, stale-write rejection, origin checks, document ownership and upload/download. Browser checks cover setup, saved dates, task completion surviving refresh, guest replies and meal fields, budget calculations, seating assignments, and phone navigation/layout.
 
-The deployed app is intentionally private and starts empty. Local test records are not deployed. Existing prototype records were in component memory; no external MySQL data was supplied or migrated. Notifications are visible inside the app only. There is no outbound email, guest self-service RSVP, multi-user shared planner, registry, payment processing, or vendor discovery service in this release.
+The app starts empty; its hosting audience is controlled separately from wedding membership. Local test records are not deployed. Existing prototype records were in component memory; no external MySQL data was supplied or migrated. Payment reminders can be exported to a calendar with alarms; there is no outbound email service, registry, payment processing or supplier discovery service. Additional tests cover payment schedules, role redaction, shared edits and revocation, household RSVP isolation and concurrency. Browser checks verify live navigation, payment schedule saves, calendar download, guest reply persistence and narrow-screen RSVP layout.

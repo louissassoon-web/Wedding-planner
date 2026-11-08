@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Planner from "@/components/planner";
+import AppEntry from "@/components/app-entry";
 export const metadata: Metadata = {
   title: "Our Wedding · A little closer to your big day",
   description:
@@ -15,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en-GB">
       <body>
-        <Planner />
+        <AppEntry />
         {children}
       </body>
     </html>

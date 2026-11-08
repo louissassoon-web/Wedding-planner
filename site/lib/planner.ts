@@ -39,6 +39,20 @@ export const guestSchema = z.object({
   table: text,
   notes: note,
 });
+export const paymentSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    label: text.min(1),
+    amount: money.refine((v) => v > 0, "Payment must be greater than zero"),
+    due: date,
+    paid: z.boolean(),
+    paidOn: date,
+    receiptId: z.string().max(80),
+  })
+  .refine((p) => p.paid || !p.paidOn, {
+    message: "Unpaid instalments cannot have a paid date",
+    path: ["paidOn"],
+  });
 export const expenseSchema = z
   .object({
     ...base,
@@ -50,10 +64,44 @@ export const expenseSchema = z
     due: date,
     vendor: text,
     notes: note,
+    schedule: z.array(paymentSchema).max(100).default([]),
   })
   .refine((e) => e.paid <= (e.actual ?? e.estimate), {
     message: "Paid amount cannot exceed the agreed cost or estimate",
     path: ["paid"],
+  })
+  .superRefine((e, ctx) => {
+    if (!e.schedule.length) return;
+    const cents = (n: number) => Math.round(n * 100);
+    if (new Set(e.schedule.map((p) => p.id)).size !== e.schedule.length)
+      ctx.addIssue({ code: "custom", message: "Payment IDs must be unique" });
+    if (
+      e.schedule.reduce((n, p) => n + cents(p.amount), 0) >
+      cents(e.actual ?? e.estimate)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Scheduled payments exceed the expense total",
+      });
+    if (
+      e.schedule
+        .filter((p) => p.paid)
+        .reduce((n, p) => n + cents(p.amount), 0) !== cents(e.paid)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Update payments through the payment schedule",
+      });
+    const due =
+      e.schedule
+        .filter((p) => !p.paid && p.due)
+        .map((p) => p.due)
+        .sort()[0] || "";
+    if (e.due !== due)
+      ctx.addIssue({
+        code: "custom",
+        message: "The next due date must match your payment schedule",
+      });
   });
 export const vendorSchema = z.object({
   ...base,
@@ -285,6 +333,7 @@ export function demoState(): PlannerState {
   s.tasks[2].done = true;
   s.expenses = [
     {
+      schedule: [],
       id: "d-e1",
       name: "Venue & reception",
       category: "Venue",
@@ -297,6 +346,7 @@ export function demoState(): PlannerState {
       archived: false,
     },
     {
+      schedule: [],
       id: "d-e2",
       name: "Wedding photography",
       category: "Photography",
@@ -309,6 +359,7 @@ export function demoState(): PlannerState {
       archived: false,
     },
     {
+      schedule: [],
       id: "d-e3",
       name: "Flowers & styling",
       category: "Flowers",

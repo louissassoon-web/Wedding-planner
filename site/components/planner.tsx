@@ -1,6 +1,5 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "radix-ui";
 import {
@@ -62,6 +61,11 @@ import {
   type PlannerState,
   type Task,
 } from "@/lib/planner";
+
+import type { Role } from "@/lib/access";
+import { TeamPanel, RsvpLinks, planUrl } from "./sharing";
+import { PaymentSchedule } from "./payment-schedule";
+import { pendingPayments, paymentCalendar } from "@/lib/payments";
 
 type Page =
   | "overview"
@@ -379,6 +383,20 @@ export default function Planner() {
     [showSetup, setShowSetup] = useState(false),
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all");
+  const [planId, setPlanId] = useState(""),
+    [role, setRole] = useState<Role>("owner"),
+    [plans, setPlans] = useState<{ id: string; name: string; role: Role }[]>(
+      [],
+    ),
+    [showRsvp, setShowRsvp] = useState(false),
+    [paymentExpense, setPaymentExpense] = useState<Expense | null>(null);
+  const canEdit = demo || role !== "viewer",
+    canManage = demo || role === "owner" || role === "editor",
+    canSeeFinance = demo || role !== "planner";
+  function openSetup() {
+    if (canManage) setShowSetup(true);
+    else setToast("Your role cannot change wedding settings.");
+  }
   const locked = useRef(false);
   useEffect(() => {
     load();
@@ -393,11 +411,40 @@ export default function Planner() {
     const id = setTimeout(() => setToast(""), 4500);
     return () => clearTimeout(id);
   }, [toast]);
-  async function load() {
+  async function load(selected?: string) {
     setLoading(true);
+    try {
+      const sample = sessionStorage.getItem("wedding-sample");
+      if (sample) {
+        setState(stateSchema.parse(JSON.parse(sample)));
+        setDemo(true);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      /* A blocked or old sample must not prevent the real planner loading. */
+    }
     setError("");
     try {
-      const res = await fetch("/api/plan", { cache: "no-store" });
+      let selection = selected;
+      if (selection === undefined) {
+        try {
+          selection = localStorage.getItem("wedding-selected-plan") || "";
+        } catch {
+          selection = "";
+        }
+      }
+      let res = await fetch(
+        selection ? planUrl("/api/plan", selection) : "/api/plan",
+        { cache: "no-store" },
+      );
+      if (res.status === 403 && selection) {
+        try {
+          localStorage.removeItem("wedding-selected-plan");
+        } catch {}
+        res = await fetch("/api/plan", { cache: "no-store" });
+        setToast("Shared access changed. Opened your own planner.");
+      }
       if (res.status === 401) {
         setUnauthorized(true);
         return;
@@ -406,10 +453,16 @@ export default function Planner() {
         error?: string;
         state: unknown;
         revision: number;
+        planId: string;
+        role: Role;
+        plans: { id: string; name: string; role: Role }[];
       };
       if (!res.ok) throw Error(data.error || "Could not load your planner.");
       setState(stateSchema.parse(data.state));
       setRevision(data.revision);
+      setPlanId(data.planId);
+      setRole(data.role);
+      setPlans(data.plans);
       setUnauthorized(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load your planner.");
@@ -418,6 +471,10 @@ export default function Planner() {
     }
   }
   async function commit(next: PlannerState, message = "Saved to your planner") {
+    if (!canEdit) {
+      setToast("Your access is read only.");
+      return false;
+    }
     if (locked.current) {
       setToast("A save is already in progress. Please try again in a moment.");
       return false;
@@ -428,6 +485,9 @@ export default function Planner() {
       return false;
     }
     if (demo) {
+      try {
+        sessionStorage.setItem("wedding-sample", JSON.stringify(parsed.data));
+      } catch {}
       setState(parsed.data);
       setToast("Updated this sample · not saved");
       return true;
@@ -436,7 +496,7 @@ export default function Planner() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/plan", {
+      const res = await fetch(planUrl("/api/plan", planId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ state: parsed.data, revision }),
@@ -492,6 +552,10 @@ export default function Planner() {
     );
   }
   function newItem(collection: Exclude<Collection, "documents">) {
+    if (!canEdit) {
+      setToast("Your access is read only.");
+      return;
+    }
     setEditor({ collection });
   }
   const tasks = active(state.tasks),
@@ -513,9 +577,17 @@ export default function Planner() {
         ["high", "medium", "low"].indexOf(a.priority) -
           ["high", "medium", "low"].indexOf(b.priority),
     );
-  const payments = expenses
-    .filter((e) => e.due && (e.actual ?? e.estimate) > e.paid)
-    .sort((a, b) => a.due.localeCompare(b.due));
+  const payments = pendingPayments(expenses);
+  function openPayment(expenseId: string) {
+    setPaymentExpense(expenses.find((e) => e.id === expenseId) || null);
+  }
+  function exportReminders() {
+    download(
+      "wedding-payment-reminders.ics",
+      paymentCalendar(state),
+      "text/calendar;charset=utf-8",
+    );
+  }
   const overdue = openTasks.filter((t) => t.due && t.due < today());
   const attention =
     overdue.length +
@@ -536,6 +608,7 @@ export default function Planner() {
   const matching = (value: string) =>
     value.toLowerCase().includes(query.toLowerCase());
   function actions(collection: Exclude<Collection, "documents">, item: Item) {
+    if (!canEdit) return null;
     return (
       <div className="row-actions">
         <button
@@ -548,7 +621,7 @@ export default function Planner() {
         <button
           className="icon-button"
           aria-label={`Archive ${"name" in item ? item.name : "title" in item ? item.title : ""}`}
-          disabled={busy}
+          disabled={busy || !canEdit}
           onClick={() => archive(collection, item.id)}
         >
           <Archive size={15} />
@@ -563,7 +636,7 @@ export default function Planner() {
         key={task.id}
       >
         <button
-          disabled={busy}
+          disabled={busy || !canEdit}
           className={"check-button " + (task.done ? "checked" : "")}
           onClick={() => patch("tasks", task.id, { done: !task.done })}
           aria-label={`${task.done ? "Reopen" : "Complete"} ${task.title}`}
@@ -655,11 +728,18 @@ export default function Planner() {
   }
   function beginDemo() {
     setDemo(true);
-    setState(demoState());
+    const sample = demoState();
+    setState(sample);
+    try {
+      sessionStorage.setItem("wedding-sample", JSON.stringify(sample));
+    } catch {}
     setError("");
     setUnauthorized(false);
   }
   async function endDemo() {
+    try {
+      sessionStorage.removeItem("wedding-sample");
+    } catch {}
     setDemo(false);
     await load();
   }
@@ -742,6 +822,17 @@ export default function Planner() {
             </strong>
           </div>
           <div className="topbar-right">
+            {!demo && (
+              <button
+                className="icon-button"
+                aria-label="Refresh plan"
+                title="Refresh plan"
+                disabled={busy}
+                onClick={() => load()}
+              >
+                <RotateCcw size={17} />
+              </button>
+            )}
             <span className="save-status">
               <span className={busy ? "saving-dot" : "saved-dot"} />
               {demo
@@ -752,23 +843,23 @@ export default function Planner() {
                     ? "Check connection"
                     : revision === 0
                       ? "Ready to plan"
-                      : "Saved to your account"}
+                      : "Saved to this wedding"}
             </span>
-            <Link
+            <a
               className="icon-button notification-link"
               href={urls.notifications}
               aria-label={`Needs attention${attention ? ", " + attention + " items" : ""}`}
             >
               <Bell size={18} />
               {attention > 0 && <b />}
-            </Link>
-            <Link
+            </a>
+            <a
               href={urls.settings}
               className="avatar"
               aria-label="Wedding settings"
             >
               {state.settings.partner1?.[0] || "W"}
-            </Link>
+            </a>
           </div>
         </header>
         {demo && (
@@ -786,7 +877,7 @@ export default function Planner() {
             <div role="alert" className="error-banner">
               <AlertCircle size={19} />
               <span>{error} Your last saved plan is safe.</span>
-              <button onClick={load} disabled={busy}>
+              <button onClick={() => load()} disabled={busy || !canEdit}>
                 Reload latest
               </button>
               <button
@@ -796,6 +887,24 @@ export default function Planner() {
               >
                 <X size={16} />
               </button>
+            </div>
+          )}
+          {!demo && role !== "owner" && (
+            <div className="access-banner">
+              {role === "viewer"
+                ? "Read-only access · you can view and export this wedding."
+                : role === "planner"
+                  ? "Planner access · logistics are shared; budget and documents stay private."
+                  : "Shared wedding · changes are saved for everyone on the team."}
+            </div>
+          )}
+          {!canSeeFinance && (page === "budget" || page === "documents") && (
+            <div className="panel compact">
+              <h2>This section is private</h2>
+              <p>
+                Your invitation covers planning logistics. Contact the wedding
+                owner if you need a different level of access.
+              </p>
             </div>
           )}
           <div className="page-heading">
@@ -812,115 +921,130 @@ export default function Planner() {
               <p>{titles[page][1]}</p>
             </div>
             <div className="heading-actions">
-              {page === "overview" && (
+              {canEdit && (
                 <>
-                  {!demo && (
-                    <button className="button secondary" onClick={beginDemo}>
-                      View sample
+                  {page === "overview" && (
+                    <>
+                      {!demo && (
+                        <button
+                          className="button secondary"
+                          onClick={beginDemo}
+                        >
+                          View sample
+                        </button>
+                      )}
+                      <button
+                        className="button primary"
+                        onClick={() => newItem("tasks")}
+                      >
+                        <Plus size={17} /> Add a task
+                      </button>
+                    </>
+                  )}
+                  {page === "tasks" && (
+                    <>
+                      <button
+                        className="button secondary"
+                        disabled={busy || !canEdit}
+                        onClick={() => {
+                          const names = new Set(
+                            state.tasks.map((t) => t.title),
+                          );
+                          commit(
+                            {
+                              ...state,
+                              tasks: [
+                                ...state.tasks,
+                                ...checklist(state.settings.date).filter(
+                                  (t) => !names.has(t.title),
+                                ),
+                              ],
+                            },
+                            "Added suggested tasks · edit or archive anything you don’t need",
+                          );
+                        }}
+                      >
+                        Use starter checklist
+                      </button>
+                      <button
+                        className="button primary"
+                        onClick={() => newItem("tasks")}
+                      >
+                        <Plus size={17} /> Add task
+                      </button>
+                    </>
+                  )}
+                  {page === "guests" && (
+                    <>
+                      <button
+                        className="button secondary"
+                        onClick={() => setShowRsvp(true)}
+                      >
+                        <Mail size={16} /> RSVP links
+                      </button>
+                      <button
+                        className="button secondary"
+                        onClick={() => setShowImport(true)}
+                      >
+                        <Upload size={16} /> Import
+                      </button>
+                      <button
+                        className="button primary"
+                        onClick={() => newItem("guests")}
+                      >
+                        <Plus size={17} /> Add guest
+                      </button>
+                    </>
+                  )}
+                  {page === "budget" && canSeeFinance && (
+                    <>
+                      <button
+                        className="button secondary"
+                        onClick={() => openSetup()}
+                      >
+                        Set budget
+                      </button>
+                      <button
+                        className="button primary"
+                        onClick={() => newItem("expenses")}
+                      >
+                        <Plus size={17} /> Add expense
+                      </button>
+                    </>
+                  )}
+                  {page === "vendors" && (
+                    <button
+                      className="button primary"
+                      onClick={() => newItem("vendors")}
+                    >
+                      <Plus size={17} /> Add supplier
                     </button>
                   )}
-                  <button
-                    className="button primary"
-                    onClick={() => newItem("tasks")}
-                  >
-                    <Plus size={17} /> Add a task
-                  </button>
+                  {page === "seating" && (
+                    <button
+                      className="button primary"
+                      onClick={() => newItem("tables")}
+                    >
+                      <Plus size={17} /> Add table
+                    </button>
+                  )}
+                  {page === "timeline" && (
+                    <button
+                      className="button primary"
+                      onClick={() => newItem("events")}
+                    >
+                      <Plus size={17} /> Add event
+                    </button>
+                  )}
+                  {page === "documents" && canSeeFinance && (
+                    <button
+                      className="button primary"
+                      onClick={() => setShowUpload(true)}
+                    >
+                      <Upload size={17} /> Upload document
+                    </button>
+                  )}
                 </>
-              )}
-              {page === "tasks" && (
-                <>
-                  <button
-                    className="button secondary"
-                    disabled={busy}
-                    onClick={() => {
-                      const names = new Set(state.tasks.map((t) => t.title));
-                      commit(
-                        {
-                          ...state,
-                          tasks: [
-                            ...state.tasks,
-                            ...checklist(state.settings.date).filter(
-                              (t) => !names.has(t.title),
-                            ),
-                          ],
-                        },
-                        "Added suggested tasks · edit or archive anything you don’t need",
-                      );
-                    }}
-                  >
-                    Use starter checklist
-                  </button>
-                  <button
-                    className="button primary"
-                    onClick={() => newItem("tasks")}
-                  >
-                    <Plus size={17} /> Add task
-                  </button>
-                </>
-              )}
-              {page === "guests" && (
-                <>
-                  <button
-                    className="button secondary"
-                    onClick={() => setShowImport(true)}
-                  >
-                    <Upload size={16} /> Import
-                  </button>
-                  <button
-                    className="button primary"
-                    onClick={() => newItem("guests")}
-                  >
-                    <Plus size={17} /> Add guest
-                  </button>
-                </>
-              )}
-              {page === "budget" && (
-                <>
-                  <button
-                    className="button secondary"
-                    onClick={() => setShowSetup(true)}
-                  >
-                    Set budget
-                  </button>
-                  <button
-                    className="button primary"
-                    onClick={() => newItem("expenses")}
-                  >
-                    <Plus size={17} /> Add expense
-                  </button>
-                </>
-              )}
-              {page === "vendors" && (
-                <button
-                  className="button primary"
-                  onClick={() => newItem("vendors")}
-                >
-                  <Plus size={17} /> Add supplier
-                </button>
-              )}
-              {page === "seating" && (
-                <button
-                  className="button primary"
-                  onClick={() => newItem("tables")}
-                >
-                  <Plus size={17} /> Add table
-                </button>
-              )}
-              {page === "timeline" && (
-                <button
-                  className="button primary"
-                  onClick={() => newItem("events")}
-                >
-                  <Plus size={17} /> Add event
-                </button>
-              )}
-              {page === "documents" && (
-                <button
-                  className="button primary"
-                  onClick={() => setShowUpload(true)}
-                >
-                  <Upload size={17} /> Upload document
-                </button>
               )}
             </div>
           </div>
@@ -938,7 +1062,7 @@ export default function Planner() {
                   </div>
                   <button
                     className="button primary"
-                    onClick={() => setShowSetup(true)}
+                    onClick={() => openSetup()}
                   >
                     Set up your wedding <ArrowRight size={16} />
                   </button>
@@ -963,14 +1087,16 @@ export default function Planner() {
                     guests.length ? (confirmed.length / guests.length) * 100 : 0
                   }
                 />
-                <Stat
-                  label="Budget remaining"
-                  value={currency(totals.remaining)}
-                  detail={`${currency(totals.forecast)} forecast of ${currency(state.settings.budget)}`}
-                  icon={Wallet}
-                  href={urls.budget}
-                  negative={totals.remaining < 0}
-                />
+                {canSeeFinance && (
+                  <Stat
+                    label="Budget remaining"
+                    value={currency(totals.remaining)}
+                    detail={`${currency(totals.forecast)} forecast of ${currency(state.settings.budget)}`}
+                    icon={Wallet}
+                    href={urls.budget}
+                    negative={totals.remaining < 0}
+                  />
+                )}
                 <Stat
                   label={
                     state.settings.date && dayDistance(state.settings.date) < 0
@@ -999,9 +1125,9 @@ export default function Planner() {
                         <p className="eyebrow">A LITTLE FOCUS</p>
                         <h2>Next on your list</h2>
                       </div>
-                      <Link className="text-link" href={urls.tasks}>
+                      <a className="text-link" href={urls.tasks}>
                         View checklist <ArrowRight size={15} />
-                      </Link>
+                      </a>
                     </div>
                     {openTasks.length ? (
                       <div>{openTasks.slice(0, 4).map(taskRow)}</div>
@@ -1046,52 +1172,54 @@ export default function Planner() {
                       </span>
                     </div>
                   </section>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <div>
-                        <p className="eyebrow">NO SURPRISES</p>
-                        <h2>Payments on the horizon</h2>
-                      </div>
-                      <Link className="text-link" href={urls.budget}>
-                        View budget <ArrowRight size={15} />
-                      </Link>
-                    </div>
-                    {payments.length ? (
-                      payments.slice(0, 3).map((e) => (
-                        <button
-                          className="payment-row"
-                          key={e.id}
-                          onClick={() =>
-                            setEditor({ collection: "expenses", item: e })
-                          }
-                        >
-                          <span className="payment-icon">
-                            <Wallet size={18} />
-                          </span>
-                          <span>
-                            <strong>{e.name}</strong>
-                            <small className={e.due < today() ? "overdue" : ""}>
-                              {e.due < today() ? "Overdue · " : ""}
-                              {formatDate(e.due)}
-                            </small>
-                          </span>
-                          <b>{currency((e.actual ?? e.estimate) - e.paid)}</b>
-                          <ChevronRight size={15} />
-                        </button>
-                      ))
-                    ) : (
-                      <div className="quiet-empty">
-                        <CheckCheck size={20} />
+                  {canSeeFinance && (
+                    <section className="panel">
+                      <div className="panel-heading">
                         <div>
-                          <strong>No payment dates on the horizon.</strong>
-                          <p>
-                            Add expenses and due dates to see your next balances
-                            here.
-                          </p>
+                          <p className="eyebrow">NO SURPRISES</p>
+                          <h2>Payments on the horizon</h2>
                         </div>
+                        <a className="text-link" href={urls.budget}>
+                          View budget <ArrowRight size={15} />
+                        </a>
                       </div>
-                    )}
-                  </section>
+                      {payments.length ? (
+                        payments.slice(0, 3).map((e) => (
+                          <button
+                            className="payment-row"
+                            key={e.id}
+                            onClick={() => openPayment(e.expenseId)}
+                          >
+                            <span className="payment-icon">
+                              <Wallet size={18} />
+                            </span>
+                            <span>
+                              <strong>{e.name}</strong>
+                              <small
+                                className={e.due < today() ? "overdue" : ""}
+                              >
+                                {e.due < today() ? "Overdue · " : ""}
+                                {formatDate(e.due)}
+                              </small>
+                            </span>
+                            <b>{currency(e.amount)}</b>
+                            <ChevronRight size={15} />
+                          </button>
+                        ))
+                      ) : (
+                        <div className="quiet-empty">
+                          <CheckCheck size={20} />
+                          <div>
+                            <strong>No payment dates on the horizon.</strong>
+                            <p>
+                              Add expenses and due dates to see your next
+                              balances here.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  )}
                 </div>
                 <div className="overview-side">
                   <div className="date-card">
@@ -1115,31 +1243,28 @@ export default function Planner() {
                       <MapPin size={13} />
                       {state.settings.venue || "Somewhere wonderful"}
                     </small>
-                    <button
-                      className="text-link"
-                      onClick={() => setShowSetup(true)}
-                    >
+                    <button className="text-link" onClick={() => openSetup()}>
                       Edit wedding details <Pencil size={13} />
                     </button>
                   </div>
                   <section className="panel compact">
                     <p className="eyebrow">YOUR PLANNING CORNER</p>
                     <h3>Keep everything close.</h3>
-                    <Link className="shortcut" href={urls.guests}>
+                    <a className="shortcut" href={urls.guests}>
                       <Users size={18} />
                       <span>Add your favourite people</span>
                       <ArrowUpRight size={16} />
-                    </Link>
-                    <Link className="shortcut" href={urls.vendors}>
+                    </a>
+                    <a className="shortcut" href={urls.vendors}>
                       <Store size={18} />
                       <span>Build your supplier team</span>
                       <ArrowUpRight size={16} />
-                    </Link>
-                    <Link className="shortcut" href={urls.timeline}>
+                    </a>
+                    <a className="shortcut" href={urls.timeline}>
                       <CalendarDays size={18} />
                       <span>Picture the wedding day</span>
                       <ArrowUpRight size={16} />
-                    </Link>
+                    </a>
                   </section>
                 </div>
               </div>
@@ -1317,7 +1442,7 @@ export default function Planner() {
                               className={"status-select " + g.rsvp}
                               aria-label={`RSVP for ${g.name}`}
                               value={g.rsvp}
-                              disabled={busy}
+                              disabled={busy || !canEdit}
                               onChange={(e) =>
                                 patch("guests", g.id, {
                                   rsvp: e.target.value as Guest["rsvp"],
@@ -1383,12 +1508,12 @@ export default function Planner() {
               </div>
               <p className="helper-text">
                 Add each plus-one as a named guest in the same household so
-                headcounts, meals and seats stay accurate. RSVPs are recorded
-                here manually.
+                headcounts, meals and seats stay accurate. Create a private RSVP
+                link for each household, or update replies here yourself.
               </p>
             </>
           )}
-          {page === "budget" && (
+          {page === "budget" && canSeeFinance && (
             <>
               <section className="stats-grid">
                 <Stat
@@ -1521,7 +1646,17 @@ export default function Planner() {
                                   : "No due date"}
                             </small>
                           </td>
-                          <td>{actions("expenses", e)}</td>
+                          <td>
+                            <div className="row-actions">
+                              <button
+                                className="button secondary small"
+                                onClick={() => setPaymentExpense(e)}
+                              >
+                                Payments
+                              </button>
+                              {actions("expenses", e)}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                   </tbody>
@@ -1534,11 +1669,29 @@ export default function Planner() {
                   />
                 )}
               </div>
-              <p className="helper-text">
-                Open an expense to record a payment in “Total paid so far”. This
-                is a tracker; it doesn’t make payments or send automatic
-                reminders.
-              </p>
+              <section className="reminder-card">
+                <CalendarDays size={24} />
+                <div>
+                  <h3>A nudge before each payment</h3>
+                  <p>
+                    Use Payments to split deposits and instalments, record paid
+                    dates and link receipts. Export due dates to your calendar
+                    with alerts 7 days and 1 day before.
+                  </p>
+                  <p className="helper-text">
+                    This is a calendar snapshot. Re-export after changes,
+                    replacing the previous import. Calendar apps may ask you to
+                    enable alerts.
+                  </p>
+                </div>
+                <button
+                  className="button secondary"
+                  disabled={!payments.length}
+                  onClick={exportReminders}
+                >
+                  <Download size={16} /> Export reminders
+                </button>
+              </section>
             </>
           )}
           {page === "vendors" && (
@@ -1668,7 +1821,7 @@ export default function Planner() {
                       <select
                         aria-label={`Table for ${g.name}`}
                         value={g.table}
-                        disabled={busy}
+                        disabled={busy || !canEdit}
                         onChange={(e) =>
                           patch("guests", g.id, { table: e.target.value })
                         }
@@ -1698,9 +1851,9 @@ export default function Planner() {
                       title="Waiting for your first yes"
                       description="Confirm a guest’s RSVP to start assigning seats."
                       action={
-                        <Link className="button secondary" href={urls.guests}>
+                        <a className="button secondary" href={urls.guests}>
                           Open guest list
-                        </Link>
+                        </a>
                       }
                     />
                   )}
@@ -1831,7 +1984,7 @@ export default function Planner() {
               </section>
             </>
           )}
-          {page === "documents" && (
+          {page === "documents" && canSeeFinance && (
             <>
               <Toolbar
                 placeholder="Search documents…"
@@ -1867,14 +2020,17 @@ export default function Planner() {
                       </div>
                       <a
                         className="icon-button"
-                        href={"/api/documents?id=" + encodeURIComponent(d.id)}
+                        href={planUrl(
+                          "/api/documents?id=" + encodeURIComponent(d.id),
+                          planId,
+                        )}
                         aria-label={`Download ${d.name}`}
                       >
                         <Download size={18} />
                       </a>
                       <button
                         className="icon-button"
-                        disabled={busy}
+                        disabled={busy || !canEdit}
                         onClick={() => archive("documents", d.id)}
                         aria-label={`Archive ${d.name}`}
                       >
@@ -1901,112 +2057,120 @@ export default function Planner() {
             </>
           )}
           {page === "settings" && (
-            <div className="settings-columns">
-              <section className="panel compact">
-                <p className="eyebrow">YOUR DAY</p>
-                <h2>Wedding details</h2>
-                <dl className="details-list">
-                  <dt>Wedding name</dt>
-                  <dd>{state.settings.name}</dd>
-                  <dt>Date</dt>
-                  <dd>{formatDate(state.settings.date)}</dd>
-                  <dt>Venue</dt>
-                  <dd>{state.settings.venue || "To be decided"}</dd>
-                  <dt>Budget</dt>
-                  <dd>{currency(state.settings.budget)}</dd>
-                  <dt>Guest target</dt>
-                  <dd>{state.settings.guestTarget || "Not set"}</dd>
-                  <dt>RSVP deadline</dt>
-                  <dd>{formatDate(state.settings.rsvpDeadline)}</dd>
-                </dl>
-                <button
-                  className="button primary"
-                  onClick={() => setShowSetup(true)}
-                >
-                  <Pencil size={15} /> Edit details
-                </button>
-              </section>
-              <div>
+            <>
+              <div className="settings-columns">
                 <section className="panel compact">
-                  <ShieldCheck size={23} />
-                  <h2>Your plan, safely kept</h2>
-                  <p>
-                    Saved privately to your signed-in account, across devices.
-                    Task owners help you divide the work; they don’t grant
-                    account access.
-                  </p>
-                  <p className="helper-text">
-                    Shared editing and guest-facing RSVPs aren’t enabled yet.
-                    Export a guest list, seating plan or timeline to share
-                    exactly what’s needed.
-                  </p>
+                  <p className="eyebrow">YOUR DAY</p>
+                  <h2>Wedding details</h2>
+                  <dl className="details-list">
+                    <dt>Wedding name</dt>
+                    <dd>{state.settings.name}</dd>
+                    <dt>Date</dt>
+                    <dd>{formatDate(state.settings.date)}</dd>
+                    <dt>Venue</dt>
+                    <dd>{state.settings.venue || "To be decided"}</dd>
+                    {canSeeFinance && (
+                      <>
+                        <dt>Budget</dt>
+                        <dd>{currency(state.settings.budget)}</dd>
+                      </>
+                    )}
+                    <dt>Guest target</dt>
+                    <dd>{state.settings.guestTarget || "Not set"}</dd>
+                    <dt>RSVP deadline</dt>
+                    <dd>{formatDate(state.settings.rsvpDeadline)}</dd>
+                  </dl>
                   <button
-                    className="button secondary"
-                    onClick={() =>
-                      download(
-                        "wedding-plan-backup.json",
-                        JSON.stringify(state, null, 2),
-                        "application/json",
-                      )
-                    }
+                    className="button primary"
+                    disabled={!canManage}
+                    onClick={() => openSetup()}
                   >
-                    <Download size={15} /> Export plan backup
+                    <Pencil size={15} /> Edit details
                   </button>
-                  <p className="helper-text">
-                    The backup includes your planning data and file names, not
-                    file contents. Download documents individually.
-                  </p>
                 </section>
-                <section className="panel compact archive-section">
-                  <p className="eyebrow">NOT GONE, JUST TUCKED AWAY</p>
-                  <h2>Archived items</h2>
-                  {(
-                    [
-                      "tasks",
-                      "guests",
-                      "expenses",
-                      "vendors",
-                      "tables",
-                      "events",
-                      "documents",
-                    ] as Collection[]
-                  ).flatMap((c) =>
-                    state[c]
-                      .filter((i) => i.archived)
-                      .map((i) => (
-                        <div className="archive-row" key={i.id}>
-                          <div>
-                            <strong>{"title" in i ? i.title : i.name}</strong>
-                            <small>{itemNames[c]}</small>
-                          </div>
-                          <button
-                            className="button secondary small"
-                            disabled={busy}
-                            onClick={() => archive(c, i.id, true)}
-                          >
-                            <RotateCcw size={14} /> Restore
-                          </button>
-                        </div>
-                      )),
-                  )}
-                  {!(
-                    [
-                      "tasks",
-                      "guests",
-                      "expenses",
-                      "vendors",
-                      "tables",
-                      "events",
-                      "documents",
-                    ] as Collection[]
-                  ).some((c) => state[c].some((i) => i.archived)) && (
-                    <p className="muted">
-                      Nothing archived. Items you remove can be restored here.
+                <div>
+                  <section className="panel compact">
+                    <ShieldCheck size={23} />
+                    <h2>Your plan, safely kept</h2>
+                    <p>
+                      Saved to your wedding across devices. Only invited team
+                      members can access the planner. Task owners help you
+                      divide the work; invite people below to give them access.
                     </p>
-                  )}
-                </section>
+                    <p className="helper-text">
+                      Create private RSVP links from the guest list. Each link
+                      covers only the people you select. Your budget, documents
+                      and other guests stay private.
+                    </p>
+                    <button
+                      className="button secondary"
+                      onClick={() =>
+                        download(
+                          "wedding-plan-backup.json",
+                          JSON.stringify(state, null, 2),
+                          "application/json",
+                        )
+                      }
+                    >
+                      <Download size={15} /> Export plan backup
+                    </button>
+                    <p className="helper-text">
+                      The backup includes your planning data and file names, not
+                      file contents. Download documents individually.
+                    </p>
+                  </section>
+                  <section className="panel compact archive-section">
+                    <p className="eyebrow">NOT GONE, JUST TUCKED AWAY</p>
+                    <h2>Archived items</h2>
+                    {(
+                      [
+                        "tasks",
+                        "guests",
+                        "expenses",
+                        "vendors",
+                        "tables",
+                        "events",
+                        "documents",
+                      ] as Collection[]
+                    ).flatMap((c) =>
+                      state[c]
+                        .filter((i) => i.archived)
+                        .map((i) => (
+                          <div className="archive-row" key={i.id}>
+                            <div>
+                              <strong>{"title" in i ? i.title : i.name}</strong>
+                              <small>{itemNames[c]}</small>
+                            </div>
+                            <button
+                              className="button secondary small"
+                              disabled={busy || !canEdit}
+                              onClick={() => archive(c, i.id, true)}
+                            >
+                              <RotateCcw size={14} /> Restore
+                            </button>
+                          </div>
+                        )),
+                    )}
+                    {!(
+                      [
+                        "tasks",
+                        "guests",
+                        "expenses",
+                        "vendors",
+                        "tables",
+                        "events",
+                        "documents",
+                      ] as Collection[]
+                    ).some((c) => state[c].some((i) => i.archived)) && (
+                      <p className="muted">
+                        Nothing archived. Items you remove can be restored here.
+                      </p>
+                    )}
+                  </section>
+                </div>
               </div>
-            </div>
+              <TeamPanel planId={planId} role={role} demo={demo} />
+            </>
           )}
           {page === "notifications" && (
             <section className="panel">
@@ -2021,9 +2185,7 @@ export default function Planner() {
                   <button
                     className="payment-row"
                     key={e.id}
-                    onClick={() =>
-                      setEditor({ collection: "expenses", item: e })
-                    }
+                    onClick={() => openPayment(e.expenseId)}
                   >
                     <Wallet size={19} />
                     <span>
@@ -2033,21 +2195,21 @@ export default function Planner() {
                         {formatDate(e.due)}
                       </small>
                     </span>
-                    <b>{currency((e.actual ?? e.estimate) - e.paid)}</b>
+                    <b>{currency(e.amount)}</b>
                     <ChevronRight size={16} />
                   </button>
                 ))}
               {state.settings.rsvpDeadline &&
                 state.settings.rsvpDeadline < today() &&
                 pending.length > 0 && (
-                  <Link className="payment-row" href={urls.guests}>
+                  <a className="payment-row" href={urls.guests}>
                     <Users size={20} />
                     <span>
                       <strong>{pending.length} guests still to reply</strong>
                       <small>Your RSVP deadline has passed.</small>
                     </span>
                     <ArrowRight size={17} />
-                  </Link>
+                  </a>
                 )}
               {attention === 0 && (
                 <Empty
@@ -2058,8 +2220,17 @@ export default function Planner() {
               )}
               <div className="panel-foot">
                 <Clock3 size={15} />
-                Reminders appear here when you open the app. No emails or push
-                notifications are sent.
+                Export payment dates to your calendar for alerts 7 days and 1
+                day before. Your calendar controls notifications.
+                {canSeeFinance && (
+                  <button
+                    className="button secondary small"
+                    disabled={!payments.length}
+                    onClick={exportReminders}
+                  >
+                    Export reminders
+                  </button>
+                )}
               </div>
             </section>
           )}
@@ -2076,13 +2247,42 @@ export default function Planner() {
           {toast}
         </div>
       )}
+      {showRsvp && canEdit && (
+        <Modal
+          title="Invite your guests to reply"
+          description="One private link for each person or household."
+          onClose={() => setShowRsvp(false)}
+        >
+          <RsvpLinks state={state} planId={planId} demo={demo} />
+        </Modal>
+      )}
+      {paymentExpense && canSeeFinance && (
+        <Modal
+          title={paymentExpense.name}
+          description="Deposits, instalments and the final balance."
+          onClose={() => {
+            if (!busy) setPaymentExpense(null);
+          }}
+        >
+          <PaymentSchedule
+            expense={paymentExpense}
+            state={state}
+            busy={busy}
+            readOnly={!canEdit}
+            onSave={async (expense) => {
+              if (await patch("expenses", expense.id, expense))
+                setPaymentExpense(null);
+            }}
+          />
+        </Modal>
+      )}
       {editor && (
         <Editor
           collection={editor.collection}
           item={editor.item}
           state={state}
           owners={owners}
-          busy={busy}
+          busy={busy || !canEdit}
           onClose={() => setEditor(null)}
           onSave={async (item) => {
             const next = {
@@ -2102,7 +2302,7 @@ export default function Planner() {
           }}
         />
       )}
-      {showSetup && (
+      {showSetup && canManage && (
         <SettingsForm
           state={state}
           busy={busy}
@@ -2112,7 +2312,7 @@ export default function Planner() {
           }}
         />
       )}
-      {showImport && (
+      {showImport && canEdit && (
         <ImportGuests
           state={state}
           busy={busy}
@@ -2128,8 +2328,9 @@ export default function Planner() {
           }}
         />
       )}
-      {showUpload && (
+      {showUpload && canManage && (
         <UploadDocument
+          planId={planId}
           demo={demo}
           busy={busy}
           onClose={() => setShowUpload(false)}
@@ -2149,12 +2350,12 @@ export default function Planner() {
   function Sidebar() {
     return (
       <>
-        <Link href="/" className="brand" onClick={() => setMobile(false)}>
+        <a href="/" className="brand" onClick={() => setMobile(false)}>
           <Heart size={25} strokeWidth={1.5} />
           <span>
             Our Wedding<small>ALL THE LITTLE DETAILS</small>
           </span>
-        </Link>
+        </a>
         <div className="wedding-label">
           <span className="wedding-icon">{initials}</span>
           <div>
@@ -2166,23 +2367,49 @@ export default function Planner() {
             </small>
           </div>
         </div>
+        {!demo && plans.length > 1 && (
+          <label className="field plan-switch">
+            <span>Switch wedding</span>
+            <select
+              aria-label="Switch wedding"
+              value={planId}
+              disabled={busy}
+              onChange={(e) => {
+                try {
+                  localStorage.setItem("wedding-selected-plan", e.target.value);
+                } catch {}
+                void load(e.target.value);
+              }}
+            >
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <p className="nav-label">YOUR PLANNING SPACE</p>
         <nav aria-label="Wedding planner">
-          {nav.map((n) => (
-            <Link
-              onClick={() => setMobile(false)}
-              href={urls[n.id]}
-              key={n.id}
-              aria-current={page === n.id ? "page" : undefined}
-              className={page === n.id ? "active" : ""}
-            >
-              <n.icon size={18} strokeWidth={1.6} />
-              <span>{n.name}</span>
-              {n.id === "tasks" && openTasks.length > 0 && (
-                <small>{openTasks.length}</small>
-              )}
-            </Link>
-          ))}
+          {nav
+            .filter(
+              (n) => canSeeFinance || !["budget", "documents"].includes(n.id),
+            )
+            .map((n) => (
+              <a
+                onClick={() => setMobile(false)}
+                href={urls[n.id]}
+                key={n.id}
+                aria-current={page === n.id ? "page" : undefined}
+                className={page === n.id ? "active" : ""}
+              >
+                <n.icon size={18} strokeWidth={1.6} />
+                <span>{n.name}</span>
+                {n.id === "tasks" && openTasks.length > 0 && (
+                  <small>{openTasks.length}</small>
+                )}
+              </a>
+            ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
@@ -2193,7 +2420,7 @@ export default function Planner() {
               <em>And everything before it.</em>
             </p>
           </div>
-          <Link
+          <a
             href={urls.settings}
             className={
               page === "settings" ? "settings-link active" : "settings-link"
@@ -2201,7 +2428,7 @@ export default function Planner() {
             onClick={() => setMobile(false)}
           >
             <Settings2 size={17} /> Settings & your data
-          </Link>
+          </a>
           {!demo && (
             <a
               className="signout"
@@ -2247,9 +2474,9 @@ function Stat({
     </>
   );
   return href ? (
-    <Link className="stat-card" href={href}>
+    <a className="stat-card" href={href}>
       {content}
-    </Link>
+    </a>
   ) : (
     <div className="stat-card">{content}</div>
   );
@@ -2472,88 +2699,104 @@ function Editor({
         }}
       >
         <fieldset disabled={busy} className="form-fields">
+          {collection === "expenses" &&
+            !!(form.schedule as unknown[] | undefined)?.length && (
+              <p className="helper-text">
+                Paid totals and due dates come from this expense’s payment
+                schedule. Use the Payments button to update instalments.
+              </p>
+            )}
           <div className="form-grid">
-            {fields[collection].map((f) => (
-              <label
-                key={f.name}
-                className={f.type === "textarea" ? "field full" : "field"}
-              >
-                <span>
-                  {f.label}
-                  {f.required ? " *" : ""}
-                </span>
-                {f.options ? (
-                  <select
-                    value={String(form[f.name] ?? "")}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.name]: e.target.value })
-                    }
-                  >
-                    {f.options.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : f.type === "textarea" ? (
-                  <textarea
-                    rows={3}
-                    maxLength={4000}
-                    value={String(form[f.name] ?? "")}
-                    onChange={(e) =>
-                      setForm({ ...form, [f.name]: e.target.value })
-                    }
-                  />
-                ) : (
-                  <input
-                    autoFocus={fields[collection][0] === f}
-                    type={f.type || "text"}
-                    required={f.required}
-                    min={
-                      f.name === "capacity"
-                        ? 1
-                        : f.type === "number"
-                          ? 0
-                          : undefined
-                    }
-                    max={
-                      f.name === "capacity"
-                        ? 100
-                        : f.type === "number"
-                          ? 100000000
-                          : undefined
-                    }
-                    step={
-                      f.name === "capacity"
-                        ? 1
-                        : f.type === "number"
-                          ? "0.01"
-                          : undefined
-                    }
-                    maxLength={200}
-                    value={String(form[f.name] ?? "")}
-                    onInput={(e) => {
-                      if (f.type === "date" || f.type === "time")
-                        setForm({ ...form, [f.name]: e.currentTarget.value });
-                    }}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        [f.name]:
-                          f.type === "number"
-                            ? e.target.value === "" && f.name === "actual"
-                              ? null
-                              : e.target.value === ""
-                                ? ""
-                                : Number(e.target.value)
-                            : e.target.value,
-                      })
-                    }
-                  />
-                )}{" "}
-                {f.hint && <small>{f.hint}</small>}
-              </label>
-            ))}
+            {fields[collection]
+              .filter(
+                (f) =>
+                  !(
+                    collection === "expenses" &&
+                    (form.schedule as unknown[] | undefined)?.length &&
+                    ["paid", "due"].includes(f.name)
+                  ),
+              )
+              .map((f) => (
+                <label
+                  key={f.name}
+                  className={f.type === "textarea" ? "field full" : "field"}
+                >
+                  <span>
+                    {f.label}
+                    {f.required ? " *" : ""}
+                  </span>
+                  {f.options ? (
+                    <select
+                      value={String(form[f.name] ?? "")}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.name]: e.target.value })
+                      }
+                    >
+                      {f.options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : f.type === "textarea" ? (
+                    <textarea
+                      rows={3}
+                      maxLength={4000}
+                      value={String(form[f.name] ?? "")}
+                      onChange={(e) =>
+                        setForm({ ...form, [f.name]: e.target.value })
+                      }
+                    />
+                  ) : (
+                    <input
+                      autoFocus={fields[collection][0] === f}
+                      type={f.type || "text"}
+                      required={f.required}
+                      min={
+                        f.name === "capacity"
+                          ? 1
+                          : f.type === "number"
+                            ? 0
+                            : undefined
+                      }
+                      max={
+                        f.name === "capacity"
+                          ? 100
+                          : f.type === "number"
+                            ? 100000000
+                            : undefined
+                      }
+                      step={
+                        f.name === "capacity"
+                          ? 1
+                          : f.type === "number"
+                            ? "0.01"
+                            : undefined
+                      }
+                      maxLength={200}
+                      value={String(form[f.name] ?? "")}
+                      onInput={(e) => {
+                        if (f.type === "date" || f.type === "time")
+                          setForm({ ...form, [f.name]: e.currentTarget.value });
+                      }}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          [f.name]:
+                            f.type === "number"
+                              ? e.target.value === "" && f.name === "actual"
+                                ? null
+                                : e.target.value === ""
+                                  ? ""
+                                  : Number(e.target.value)
+                              : e.target.value,
+                        })
+                      }
+                    />
+                  )}{" "}
+                  {f.hint && <small>{f.hint}</small>}
+                </label>
+              ))}
           </div>
           {error && (
             <p className="form-error" role="alert">
@@ -2825,11 +3068,13 @@ function ImportGuests({
   );
 }
 function UploadDocument({
+  planId,
   demo,
   busy,
   onClose,
   onSave,
 }: {
+  planId: string;
   demo: boolean;
   busy: boolean;
   onClose: () => void;
@@ -2842,7 +3087,7 @@ function UploadDocument({
   return (
     <Modal
       title="Keep a document close"
-      description="Files are private to your signed-in account. Maximum size: 10 MB."
+      description="Files are shared with full editors and viewers of this wedding. Maximum size: 10 MB."
       onClose={() => {
         if (!uploading && !busy) onClose();
       }}
@@ -2863,7 +3108,7 @@ function UploadDocument({
             const data = new FormData();
             data.append("file", file);
             data.append("folder", folder);
-            const res = await fetch("/api/documents", {
+            const res = await fetch(planUrl("/api/documents", planId), {
               method: "POST",
               body: data,
             });
